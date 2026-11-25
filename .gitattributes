@@ -1,0 +1,2 @@
+# The fixtures are compared byte for byte: Git must not change their line endings.
+data/samples/**/*.csv -text

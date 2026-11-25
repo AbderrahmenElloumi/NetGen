@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Data and generated artifacts
+data/external/
+out/*
+!out/.gitkeep
+tmp/
+*.pt
+
+# Office lock files
+~$*
+
+# Claude Code local state
+.claude/worktrees/
+.claude/settings.local.json
+CLAUDE.local.md

@@ -1,0 +1,120 @@
+# Every NetGen command runs here: docker compose run --rm <service>.
+# Paths are relative only: Git Bash rewrites absolute paths in volume arguments.
+
+x-py315: &py315
+  context: .
+  target: runtime
+  args:
+    PYTHON_VERSION: "3.15.2"
+
+x-py312: &py312
+  context: .
+  target: runtime
+  args:
+    PYTHON_VERSION: "3.12.16"
+
+x-environment: &environment
+  PYTHONPATH: /app/src
+  PYTHONDONTWRITEBYTECODE: "1"
+  HOME: /tmp
+  PYTEST_ADDOPTS: "-o cache_dir=/tmp/pytest_cache"
+  RUFF_CACHE_DIR: /tmp/ruff_cache
+  MYPY_CACHE_DIR: /tmp/mypy_cache
+  UV_CACHE_DIR: /tmp/uv_cache
+
+# NETGEN_MEMORY raises the memory limit for runtime checks on the CICIDS dataset.
+x-limits: &limits
+  cpus: 2
+  mem_limit: ${NETGEN_MEMORY:-4g}
+  memswap_limit: ${NETGEN_MEMORY:-4g}
+  pids_limit: 256
+  user: "1000:1000"
+  read_only: true
+  tmpfs:
+    - /tmp
+  working_dir: /app
+  environment: *environment
+
+services:
+  test:
+    <<: *limits
+    build: *py315
+    image: netgen:3.15
+    network_mode: none
+    volumes:
+      - .:/app:ro
+    command: pytest
+
+  test-floor:
+    <<: *limits
+    build: *py312
+    image: netgen:3.12
+    network_mode: none
+    volumes:
+      - .:/app:ro
+    command: pytest
+
+  check:
+    <<: *limits
+    build: *py315
+    image: netgen:3.15
+    network_mode: none
+    volumes:
+      - .:/app:ro
+      - ./out:/app/out
+    # The static checks, then the demo commands of the README into out/.
+    # out/.gitkeep keeps out/ in a clone: Docker would create a missing
+    # bind-mount source as root, and the non-root user could not write it.
+    command:
+      - sh
+      - -c
+      - >-
+        ruff check
+        && ruff format --check
+        && mypy
+        && python -m netgen build data/samples/demo_capture.pcap --out out/demo_capture --autoencoder --latents --force
+        && python -m netgen build data/samples/demo_flows.csv --out out/demo_flows --benchmark --force
+
+  dev:
+    <<: *limits
+    build: *py315
+    image: netgen:3.15
+    network_mode: none
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/app
+      - ./data/external:/app/data/external:ro
+    command: bash
+
+  lock:
+    <<: *limits
+    build:
+      context: .
+      target: base
+      args:
+        PYTHON_VERSION: "3.15.2"
+    image: netgen-lock:3.15
+    environment:
+      <<: *environment
+      UV_NO_SYNC: "1"
+    volumes:
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./uv.lock:/app/uv.lock
+    # uv replaces files by renaming a temporary file, which fails on a
+    # single-file mount. The command runs on copies in /tmp, and changed
+    # files are written back in place.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        mkdir -p /tmp/project
+        cp /app/pyproject.toml /app/uv.lock /tmp/project/
+        cd /tmp/project
+        "$$@"
+        for f in pyproject.toml uv.lock; do
+          cmp -s "$$f" "/app/$$f" || cat "$$f" > "/app/$$f"
+        done
+      - lock
+    command: uv lock
